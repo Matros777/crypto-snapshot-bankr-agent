@@ -1,6 +1,7 @@
 """
 Crypto Snapshot Pro — Bankr Agent (БЕЗ X402 ЛОГИКИ)
 Bankr сам обрабатывает платежи
+Вывод в чистом Markdown для терминала
 """
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -169,7 +170,7 @@ app.mount("/mcp", mcp_app)
 logger.info("✅ MCP server mounted at /mcp")
 
 # ============================================================
-# ГЛАВНАЯ СТРАНИЦА
+# ГЛАВНАЯ СТРАНИЦА С РАЗВЕРНУТЫМ ОПИСАНИЕМ
 # ============================================================
 
 @app.get("/")
@@ -177,9 +178,46 @@ async def root():
     return JSONResponse({
         "service": "Crypto Snapshot Pro",
         "status": "active",
+        "description": "AI-powered crypto trading signals with professional technical analysis. Provides LONG/SHORT/HOLD signals with entry levels, target prices, stop-loss, and AI-generated market commentary based on RSI, MACD, Bollinger Bands, volume analysis, and pivot points. Includes conviction scoring, risk/reward ratios, and 24-hour price predictions.",
+        "version": "1.0.0",
         "endpoints": {
-            "POST /": "Get crypto signal",
-            "GET /health": "Health check"
+            "POST /": "Get crypto signal (send JSON with symbol)",
+            "GET /health": "Health check",
+            "GET /mcp": "MCP server for AI agents"
+        },
+        "schema": {
+            "input": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Cryptocurrency symbol (e.g., BTC, ETH, SOL, DOGE, XRP, ADA, DOT, LINK, AVAX, MATIC)",
+                        "example": "BTC",
+                        "pattern": "^[A-Z]+$"
+                    }
+                },
+                "required": ["symbol"]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Trading pair symbol (e.g., BTCUSDT)"
+                    },
+                    "analysis": {
+                        "type": "string",
+                        "description": "Complete trading analysis in Markdown format with: technical signal (LONG/SHORT/HOLD), conviction level (VERY HIGH/HIGH/MEDIUM/LOW), entry/target/stop levels, RSI, EMA, MACD, Bollinger Bands, volume ratio, AI professional commentary with market assessment, price prediction, risk assessment, confidence level, key levels to watch"
+                    }
+                }
+            }
+        },
+        "example": {
+            "request": {"symbol": "BTC"},
+            "response": {
+                "symbol": "BTC",
+                "analysis": "# 📊 CRYPTO SNAPSHOT PRO — BTC/USDT\n\n## 🎯 TECHNICAL SIGNAL\n**🚀 Strong Bullish Setup**\n- **Conviction:** HIGH\n- **Score:** 4.5 🟢 LONG / 1.5 🔴 SHORT\n\n---\n\n## 📈 TECHNICAL INDICATORS\n| Indicator | Value |\n|-----------|-------|\n| **Price** | $65,432.10 |\n| **24h Change** | +2.35% |\n| **RSI(14)** | 62.4 (neutral) |\n| **EMA(20)** | $64,800.00 |\n| **EMA(50)** | $63,200.00 |\n| **Volume Ratio** | 1.85x |\n\n---\n\n## 🎯 STRATEGY LEVELS\n| Level | Price |\n|-------|-------|\n| **Entry** | $65,100.00 |\n| **Target** | $66,800.00 |\n| **Stop Loss** | $64,200.00 |\n| **Risk/Reward** | 1:2.13 |\n\n---\n\n## 🤖 PROFESSIONAL AI ANALYSIS\n[AI-generated market commentary with price prediction, risk assessment, and final recommendation]\n\n---\n\n## 📌 KEY LEVELS\n| Level | Price |\n|-------|-------|\n| **Support** | $64,200.00 |\n| **Resistance** | $66,800.00 |\n| **24h High** | $66,200.00 |\n| **24h Low** | $63,800.00 |\n\n---\n\n⚠️ **Risk Disclosure:** This is NOT financial advice. Always manage risk."
+            }
         }
     })
 
@@ -355,7 +393,7 @@ async def crypto_snapshot(request: Request):
     })
 
 # ============================================================
-# ГЕНЕРАЦИЯ СИГНАЛА
+# ГЕНЕРАЦИЯ СИГНАЛА (MARKDOWN ВЫВОД)
 # ============================================================
 
 async def generate_signal(symbol: str) -> str:
@@ -442,48 +480,59 @@ async def generate_signal(symbol: str) -> str:
 
         ai_analysis = await generate_ai_analysis(symbol, signal_data)
 
-        result = f"""
-╔══════════════════════════════════════════════════════════════════╗
-║  📊 CRYPTO SNAPSHOT PRO — {symbol.replace('USDT', '/USDT')}          ║
-╚══════════════════════════════════════════════════════════════════╝
+        # ============================================================
+        # MARKDOWN ВЫВОД (БЕЗ МУСОРНЫХ СИМВОЛОВ)
+        # ============================================================
+        
+        signal_emoji = "🚀" if signal == "LONG" else "🔥" if signal == "SHORT" else "➡️"
+        
+        result = f"""# 📊 CRYPTO SNAPSHOT PRO — {symbol.replace('USDT', '/USDT')}
 
-╔══════════════════════════════════════════════════════════════════╗
-║  🎯 TECHNICAL SIGNAL                                           ║
-╠══════════════════════════════════════════════════════════════════╣
-║  {signal_desc} ║
-║  Conviction: {conviction:<10}  |  Score: {long_score:.1f}🟢LONG / {short_score:.1f}🔴SHORT    ║
-╚══════════════════════════════════════════════════════════════════╝
+## 🎯 TECHNICAL SIGNAL
+**{signal_emoji} {signal_desc}**
+- **Conviction:** {conviction}
+- **Score:** {long_score:.1f} 🟢 LONG / {short_score:.1f} 🔴 SHORT
 
-╔══════════════════════════════════════════════════════════════════╗
-║  📈 TECHNICAL INDICATORS                                       ║
-╠══════════════════════════════════════════════════════════════════╣
-║  Price:  {format_price(current_price):<20}  24h Change: {change_24h:+.2f}% ║
-║  RSI(14): {rsi:.1f} ({rsi_status})                         ║
-║  EMA(20): {format_price(ema20):<20}  EMA(50): {format_price(ema50)} ║
-║  Volume Ratio: {volume_ratio:.2f}x                              ║
-╚══════════════════════════════════════════════════════════════════╝
+---
 
-╔══════════════════════════════════════════════════════════════════╗
-║  🎯 STRATEGY LEVELS                                            ║
-╠══════════════════════════════════════════════════════════════════╣
-║  Entry:  {format_price(entry):<20}  Target: {format_price(target)} ║
-║  Stop:   {format_price(stop):<20}  Risk/Reward: 1:{risk_reward:.2f} ║
-╚══════════════════════════════════════════════════════════════════╝
+## 📈 TECHNICAL INDICATORS
+| Indicator | Value |
+|-----------|-------|
+| **Price** | {format_price(current_price)} |
+| **24h Change** | {change_24h:+.2f}% |
+| **RSI(14)** | {rsi:.1f} ({rsi_status}) |
+| **EMA(20)** | {format_price(ema20)} |
+| **EMA(50)** | {format_price(ema50)} |
+| **Volume Ratio** | {volume_ratio:.2f}x |
 
-╔══════════════════════════════════════════════════════════════════╗
-║  🤖 PROFESSIONAL AI ANALYSIS                                   ║
-╠══════════════════════════════════════════════════════════════════╣
+---
+
+## 🎯 STRATEGY LEVELS
+| Level | Price |
+|-------|-------|
+| **Entry** | {format_price(entry)} |
+| **Target** | {format_price(target)} |
+| **Stop Loss** | {format_price(stop)} |
+| **Risk/Reward** | 1:{risk_reward:.2f} |
+
+---
+
+## 🤖 PROFESSIONAL AI ANALYSIS
 {ai_analysis}
-╚══════════════════════════════════════════════════════════════════╝
 
-╔══════════════════════════════════════════════════════════════════╗
-║  📌 KEY LEVELS                                                ║
-╠══════════════════════════════════════════════════════════════════╣
-║  Support:  {format_price(support):<20}  Resistance: {format_price(resistance)} ║
-║  24h High: {format_price(high_24h):<20}  24h Low:  {format_price(low_24h)} ║
-╚══════════════════════════════════════════════════════════════════╝
+---
 
-⚠️  Risk Disclosure: This is NOT financial advice. Always manage risk.
+## 📌 KEY LEVELS
+| Level | Price |
+|-------|-------|
+| **Support** | {format_price(support)} |
+| **Resistance** | {format_price(resistance)} |
+| **24h High** | {format_price(high_24h)} |
+| **24h Low** | {format_price(low_24h)} |
+
+---
+
+⚠️ **Risk Disclosure:** This is NOT financial advice. Always manage risk.
 """
         return result
 
