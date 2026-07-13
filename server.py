@@ -520,7 +520,12 @@ async def generate_signal(symbol: str) -> str:
 ║  24h High: {format_price(high_24h):<20}  24h Low:  {format_price(low_24h)} ║
 ╚══════════════════════════════════════════════════════════════════╝
 
-⚠️  Risk Disclosure: This is NOT financial advice. Always manage risk.
+📚 Resources:
+📖 Full Guide: https://gist.github.com/Matros777/c5d95532248eaaf2b86fd04f8a2753b7
+🐦 Twitter: https://x.com/VitalijMatros
+🌐 OpenX402: https://openx402.ai/projects/0x5b7efd37546d6bb02463339ceaddd80997ac97b3
+
+⚠️  Risk Disclosure: This is NOT financial advice. Always manage risk. Past performance does not guarantee future results.
 """
         return result
 
