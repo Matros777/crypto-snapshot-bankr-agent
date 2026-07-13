@@ -1,7 +1,6 @@
 """
 Crypto Snapshot Pro — Bankr Agent (БЕЗ X402 ЛОГИКИ)
 Bankr сам обрабатывает платежи
-Вывод в чистом Markdown для терминала
 """
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -125,8 +124,7 @@ async def mcp_handler(request: Request):
 
                     if response.status_code == 200:
                         data = response.json()
-                        # Извлекаем analysis из ответа
-                        content = data.get("analysis", str(data))
+                        content = data.get("message", {}).get("content", str(data))
                         return {
                             "jsonrpc": "2.0",
                             "id": request_id,
@@ -208,7 +206,7 @@ async def root():
                     },
                     "analysis": {
                         "type": "string",
-                        "description": "Complete trading analysis in Markdown format with: technical signal (LONG/SHORT/HOLD), conviction level (VERY HIGH/HIGH/MEDIUM/LOW), entry/target/stop levels, RSI, EMA, MACD, Bollinger Bands, volume ratio, AI professional commentary with market assessment, price prediction, risk assessment, confidence level, key levels to watch"
+                        "description": "Complete trading analysis with: technical signal (LONG/SHORT/HOLD), conviction level (VERY HIGH/HIGH/MEDIUM/LOW), entry/target/stop levels, RSI, EMA, MACD, Bollinger Bands, volume ratio, AI professional commentary with market assessment, price prediction, risk assessment, confidence level, key levels to watch"
                     }
                 }
             }
@@ -217,7 +215,7 @@ async def root():
             "request": {"symbol": "BTC"},
             "response": {
                 "symbol": "BTC",
-                "analysis": "# 📊 CRYPTO SNAPSHOT PRO — BTC/USDT\n\n## 🎯 TECHNICAL SIGNAL\n**🚀 Strong Bullish Setup**\n- **Conviction:** HIGH\n- **Score:** 4.5 🟢 LONG / 1.5 🔴 SHORT\n\n---\n\n## 📈 TECHNICAL INDICATORS\n| Indicator | Value |\n|-----------|-------|\n| **Price** | $65,432.10 |\n| **24h Change** | +2.35% |\n| **RSI(14)** | 62.4 (neutral) |\n| **EMA(20)** | $64,800.00 |\n| **EMA(50)** | $63,200.00 |\n| **Volume Ratio** | 1.85x |\n\n---\n\n## 🎯 STRATEGY LEVELS\n| Level | Price |\n|-------|-------|\n| **Entry** | $65,100.00 |\n| **Target** | $66,800.00 |\n| **Stop Loss** | $64,200.00 |\n| **Risk/Reward** | 1:2.13 |\n\n---\n\n## 🤖 PROFESSIONAL AI ANALYSIS\n[AI-generated market commentary with price prediction, risk assessment, and final recommendation]\n\n---\n\n## 📌 KEY LEVELS\n| Level | Price |\n|-------|-------|\n| **Support** | $64,200.00 |\n| **Resistance** | $66,800.00 |\n| **24h High** | $66,200.00 |\n| **24h Low** | $63,800.00 |\n\n---\n\n⚠️ **Risk Disclosure:** This is NOT financial advice. Always manage risk."
+                "analysis": "📊 CRYPTO SNAPSHOT PRO — BTC/USDT\n\n🎯 TECHNICAL SIGNAL: 🚀 Strong Bullish Setup\nConviction: HIGH | Score: 4.5🟢LONG / 1.5🔴SHORT\n\n📈 TECHNICAL INDICATORS:\nPrice: $65,432.10  24h Change: +2.35%\nRSI(14): 62.4 (neutral)\nEMA(20): $64,800.00  EMA(50): $63,200.00\nVolume Ratio: 1.85x\n\n🎯 STRATEGY LEVELS:\nEntry: $65,100.00  Target: $66,800.00\nStop: $64,200.00  Risk/Reward: 1:2.13\n\n🤖 PROFESSIONAL AI ANALYSIS:\n[AI-generated market commentary with price prediction, risk assessment, and final recommendation]\n\n📌 KEY LEVELS:\nSupport: $64,200.00  Resistance: $66,800.00\n24h High: $66,200.00  24h Low: $63,800.00\n\n⚠️ Risk Disclosure: This is NOT financial advice. Always manage risk."
             }
         }
     })
@@ -394,7 +392,7 @@ async def crypto_snapshot(request: Request):
     })
 
 # ============================================================
-# ГЕНЕРАЦИЯ СИГНАЛА (ЧИСТЫЙ MARKDOWN)
+# ГЕНЕРАЦИЯ СИГНАЛА
 # ============================================================
 
 async def generate_signal(symbol: str) -> str:
@@ -481,62 +479,48 @@ async def generate_signal(symbol: str) -> str:
 
         ai_analysis = await generate_ai_analysis(symbol, signal_data)
 
-        # ============================================================
-        # ЧИСТЫЙ MARKDOWN ВЫВОД (БЕЗ МУСОРНЫХ СИМВОЛОВ)
-        # ============================================================
-        
-        signal_emoji = "🚀" if signal == "LONG" else "🔥" if signal == "SHORT" else "➡️"
-        
-        # Очищаем AI анализ от лишних символов, если они есть
-        ai_analysis = ai_analysis.replace('\r', '').strip()
-        
-        result = f"""# 📊 CRYPTO SNAPSHOT PRO — {symbol.replace('USDT', '/USDT')}
+        result = f"""
+╔══════════════════════════════════════════════════════════════════╗
+║  📊 CRYPTO SNAPSHOT PRO — {symbol.replace('USDT', '/USDT')}          ║
+╚══════════════════════════════════════════════════════════════════╝
 
-## 🎯 TECHNICAL SIGNAL
-**{signal_emoji} {signal_desc}**
-- **Conviction:** {conviction}
-- **Score:** {long_score:.1f} 🟢 LONG / {short_score:.1f} 🔴 SHORT
+╔══════════════════════════════════════════════════════════════════╗
+║  🎯 TECHNICAL SIGNAL                                           ║
+╠══════════════════════════════════════════════════════════════════╣
+║  {signal_desc} ║
+║  Conviction: {conviction:<10}  |  Score: {long_score:.1f}🟢LONG / {short_score:.1f}🔴SHORT    ║
+╚══════════════════════════════════════════════════════════════════╝
 
----
+╔══════════════════════════════════════════════════════════════════╗
+║  📈 TECHNICAL INDICATORS                                       ║
+╠══════════════════════════════════════════════════════════════════╣
+║  Price:  {format_price(current_price):<20}  24h Change: {change_24h:+.2f}% ║
+║  RSI(14): {rsi:.1f} ({rsi_status})                         ║
+║  EMA(20): {format_price(ema20):<20}  EMA(50): {format_price(ema50)} ║
+║  Volume Ratio: {volume_ratio:.2f}x                              ║
+╚══════════════════════════════════════════════════════════════════╝
 
-## 📈 TECHNICAL INDICATORS
-| Indicator | Value |
-|-----------|-------|
-| **Price** | {format_price(current_price)} |
-| **24h Change** | {change_24h:+.2f}% |
-| **RSI(14)** | {rsi:.1f} ({rsi_status}) |
-| **EMA(20)** | {format_price(ema20)} |
-| **EMA(50)** | {format_price(ema50)} |
-| **Volume Ratio** | {volume_ratio:.2f}x |
+╔══════════════════════════════════════════════════════════════════╗
+║  🎯 STRATEGY LEVELS                                            ║
+╠══════════════════════════════════════════════════════════════════╣
+║  Entry:  {format_price(entry):<20}  Target: {format_price(target)} ║
+║  Stop:   {format_price(stop):<20}  Risk/Reward: 1:{risk_reward:.2f} ║
+╚══════════════════════════════════════════════════════════════════╝
 
----
-
-## 🎯 STRATEGY LEVELS
-| Level | Price |
-|-------|-------|
-| **Entry** | {format_price(entry)} |
-| **Target** | {format_price(target)} |
-| **Stop Loss** | {format_price(stop)} |
-| **Risk/Reward** | 1:{risk_reward:.2f} |
-
----
-
-## 🤖 PROFESSIONAL AI ANALYSIS
+╔══════════════════════════════════════════════════════════════════╗
+║  🤖 PROFESSIONAL AI ANALYSIS                                   ║
+╠══════════════════════════════════════════════════════════════════╣
 {ai_analysis}
+╚══════════════════════════════════════════════════════════════════╝
 
----
+╔══════════════════════════════════════════════════════════════════╗
+║  📌 KEY LEVELS                                                ║
+╠══════════════════════════════════════════════════════════════════╣
+║  Support:  {format_price(support):<20}  Resistance: {format_price(resistance)} ║
+║  24h High: {format_price(high_24h):<20}  24h Low:  {format_price(low_24h)} ║
+╚══════════════════════════════════════════════════════════════════╝
 
-## 📌 KEY LEVELS
-| Level | Price |
-|-------|-------|
-| **Support** | {format_price(support)} |
-| **Resistance** | {format_price(resistance)} |
-| **24h High** | {format_price(high_24h)} |
-| **24h Low** | {format_price(low_24h)} |
-
----
-
-⚠️ **Risk Disclosure:** This is NOT financial advice. Always manage risk.
+⚠️  Risk Disclosure: This is NOT financial advice. Always manage risk.
 """
         return result
 
