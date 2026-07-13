@@ -31,7 +31,7 @@ logger = logging.getLogger("crypto-snapshot")
 # ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
 # ============================================================
 
-# ASI API KEY (обязательно добавить на Render!)
+# ASI API KEY
 ASI_API_KEY = os.getenv("ASI_API_KEY", "")
 if not ASI_API_KEY:
     logger.warning("⚠️ ASI_API_KEY not set! AI analysis will use fallback.")
@@ -352,22 +352,51 @@ async def fetch_binance(endpoint: str, params: dict = None) -> dict:
 
     try:
         if USE_PROXY and PROXY_URL:
-            async with httpx.AsyncClient(timeout=15.0, proxy=PROXY_URL) as client:
-                response = await client.get(f"{BINANCE_API}/{endpoint}", params=params)
+            logger.info(f"🌐 Using proxy: {PROXY_HOST}:{PROXY_PORT}")
+            # ✅ ПРАВИЛЬНАЯ ПЕРЕДАЧА SOCKS5 ПРОКСИ!
+            async with httpx.AsyncClient(
+                timeout=15.0,
+                proxies={
+                    "http://": PROXY_URL,
+                    "https://": PROXY_URL
+                }
+            ) as client:
+                response = await client.get(
+                    f"{BINANCE_API}/{endpoint}",
+                    params=params
+                )
         else:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(f"{BINANCE_API}/{endpoint}", params=params)
+                response = await client.get(
+                    f"{BINANCE_API}/{endpoint}",
+                    params=params
+                )
 
         if response.status_code != 200:
-            logger.error(f"Binance error: {response.status_code}")
+            logger.error(f"❌ Binance error: {response.status_code}")
             raise HTTPException(status_code=503, detail="Market data unavailable")
 
         data = response.json()
         _cache[cache_key] = {"data": data, "time": now}
+        logger.info(f"✅ Binance data fetched: {endpoint}")
         return data
 
+    except httpx.ProxyError as e:
+        logger.error(f"🚫 Proxy error: {e}")
+        logger.info("🔄 Retrying without proxy...")
+        # Пробуем без прокси если прокси упал
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                f"{BINANCE_API}/{endpoint}",
+                params=params
+            )
+            if response.status_code == 200:
+                data = response.json()
+                _cache[cache_key] = {"data": data, "time": now}
+                return data
+            raise HTTPException(status_code=503, detail="Market data unavailable")
     except Exception as e:
-        logger.error(f"Request error: {e}")
+        logger.error(f"❌ Request error: {e}")
         raise HTTPException(status_code=503, detail="Market data unavailable")
 
 async def fetch_ticker(symbol: str) -> dict:
@@ -706,6 +735,7 @@ async def health_check():
         "service": "crypto-snapshot-pro",
         "version": "2.0.0",
         "proxy_enabled": USE_PROXY,
+        "proxy_host": PROXY_HOST if USE_PROXY else None,
         "asi_enabled": bool(ASI_API_KEY),
         "asi_models": ASI_MODELS
     }
