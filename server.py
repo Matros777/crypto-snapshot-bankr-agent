@@ -35,7 +35,7 @@ logger = logging.getLogger("crypto-snapshot")
 
 # ТВОЙ КОШЕЛЕК ДЛЯ ПОЛУЧЕНИЯ USDC
 PAYTO_ADDRESS = os.getenv("PAYTO_ADDRESS", "0x08E4D3F8098c388046c37f5b0Bf7B11042b9b2b5")
-USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+USDC_ADDRESS = "0x5b7efd37546d6BB02463339cEaDdD80997aC97B3"
 PRICE_AMOUNT = "25000"  # 0.025 USDC
 
 # ПРОКСИ
