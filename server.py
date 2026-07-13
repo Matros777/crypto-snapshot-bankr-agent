@@ -1,5 +1,5 @@
 """
-Crypto Snapshot Pro — Bankr Agent (ТОЛЬКО СИГНАЛЫ, БЕЗ СТАТИКИ)
+Crypto Snapshot Pro — Bankr Agent (API + ASI)
 """
 
 from fastapi import FastAPI, HTTPException, Request
@@ -7,12 +7,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import httpx
 import time
-import base64
 import json
 import logging
 import sys
 import os
-from typing import Optional, Any
 from dotenv import load_dotenv
 
 # ============================================================
@@ -33,6 +31,16 @@ logger = logging.getLogger("crypto-snapshot")
 # ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
 # ============================================================
 
+# ASI API KEY (обязательно добавить на Render!)
+ASI_API_KEY = os.getenv("ASI_API_KEY", "")
+if not ASI_API_KEY:
+    logger.warning("⚠️ ASI_API_KEY not set! AI analysis will use fallback.")
+
+ASI_MODELS = [
+    {"id": "asi1", "name": "ASI1"},
+    {"id": "asi1-mini", "name": "ASI1 Mini"}
+]
+
 # ПРОКСИ
 USE_PROXY = os.getenv("PROXY_ENABLED", "false").lower() == "true"
 PROXY_HOST = os.getenv("PROXY_HOST")
@@ -51,14 +59,14 @@ BINANCE_API = "https://api.binance.com/api/v3"
 _cache = {}
 _CACHE_TTL = 60
 
-MIN_AMOUNT = 25000
-
 # ============================================================
-# СОЗДАЕМ ГЛАВНОЕ ПРИЛОЖЕНИЕ
+# СОЗДАЕМ ПРИЛОЖЕНИЕ
 # ============================================================
 
 app = FastAPI(
-    title="Crypto Snapshot Pro (Bankr)"
+    title="Crypto Snapshot Pro (Bankr Agent)",
+    description="AI-powered crypto trading signals with ASI integration",
+    version="2.0.0"
 )
 
 # ============================================================
@@ -84,7 +92,7 @@ async def mcp_handler(request: Request):
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
-                    "serverInfo": {"name": "Crypto Snapshot Pro", "version": "1.0.0"}
+                    "serverInfo": {"name": "Crypto Snapshot Pro", "version": "2.0.0"}
                 }
             }
 
@@ -96,7 +104,7 @@ async def mcp_handler(request: Request):
                     "tools": [
                         {
                             "name": "crypto_snapshot",
-                            "description": "Get AI-powered crypto market analysis for any cryptocurrency. Returns LONG/SHORT/HOLD signal with entry, target, stop levels.",
+                            "description": "Get AI-powered crypto market analysis with ASI. Returns LONG/SHORT/HOLD signal with entry, target, stop levels.",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
@@ -118,32 +126,14 @@ async def mcp_handler(request: Request):
 
             if tool_name == "crypto_snapshot":
                 symbol = arguments.get("symbol", "BTC")
-
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(
-                        "http://localhost:10000/",
-                        json={"symbol": symbol}
-                    )
-
-                    if response.status_code == 200:
-                        data = response.json()
-                        content = data.get("message", {}).get("content", str(data))
-                        return {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "result": {
-                                "content": [{"type": "text", "text": content}]
-                            }
-                        }
-                    else:
-                        return {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "error": {
-                                "code": response.status_code,
-                                "message": "Payment required or API error"
-                            }
-                        }
+                result = await generate_signal(symbol)
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "content": [{"type": "text", "text": result}]
+                    }
+                }
 
         if method == "ping":
             return {"jsonrpc": "2.0", "id": request_id, "result": {"status": "pong"}}
@@ -165,36 +155,192 @@ async def mcp_handler(request: Request):
         }
 
 @mcp_app.get("/health")
-async def mcp_health(request: Request):
-    return {"status": "ok", "service": "MCP Server", "version": "1.0.0"}
+async def mcp_health():
+    return {"status": "ok", "service": "MCP Server", "version": "2.0.0"}
 
 app.mount("/mcp", mcp_app)
 logger.info("✅ MCP server mounted at /mcp")
 
 # ============================================================
-# ГЛАВНАЯ СТРАНИЦА — ПРОСТОЙ JSON (БЕЗ РЕДИРЕКТОВ И СТАТИКИ)
+# ГЛАВНЫЙ ЭНДПОИНТ
 # ============================================================
 
 @app.get("/")
 async def root():
     return JSONResponse({
         "service": "Crypto Snapshot Pro (Bankr Agent)",
+        "version": "2.0.0",
         "status": "active",
+        "ai_provider": "ASI (Artificial Superintelligence)",
         "endpoints": {
-            "POST /": "Generate crypto signal (requires symbol)",
+            "POST /": "Generate crypto signal with AI analysis",
             "GET /health": "Health check",
             "POST /api/balance": "Check USDC balance",
-            "GET /api/balance/{address}": "Check USDC balance"
+            "GET /api/balance/{address}": "Check USDC balance",
+            "POST /mcp": "MCP server endpoint"
         },
         "usage": {
             "method": "POST",
             "body": {"symbol": "BTC"},
             "example": "curl -X POST https://crypto-snapshot-bankr-agent.onrender.com/ -H 'Content-Type: application/json' -d '{\"symbol\":\"BTC\"}'"
+        },
+        "environment_variables": {
+            "ASI_API_KEY": "Required for AI analysis (set on Render)"
         }
     })
 
 # ============================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ASI PROMPT И ФУНКЦИИ
+# ============================================================
+
+PROFESSIONAL_PROMPT = """
+You are a professional crypto trader with 20+ years of experience managing institutional portfolios.
+You provide conservative, data-driven trading advice with clear risk management.
+
+Based on the technical analysis below, provide a professional trading recommendation:
+
+TECHNICAL DATA:
+Symbol: {symbol}
+Current Price: ${price}
+24h Change: {change}%
+RSI(14): {rsi}
+EMA(20): ${ema20}
+EMA(50): ${ema50}
+Volume Ratio: {volume_ratio}x
+Signal: {signal}
+Conviction: {conviction}
+Entry: ${entry}
+Target: ${target}
+Stop: ${stop}
+Risk/Reward: 1:{risk_reward}
+Support: ${support}
+Resistance: ${resistance}
+24h High: ${high_24h}
+24h Low: ${low_24h}
+Long Score: {long_score}
+Short Score: {short_score}
+
+YOUR ANALYSIS MUST INCLUDE:
+1. MARKET ASSESSMENT (2-3 sentences)
+2. TRADE RECOMMENDATION: LONG / SHORT / HOLD
+3. PRICE PREDICTION 24H with percentage
+4. ENTRY ZONE
+5. TARGET LEVELS T1 and T2
+6. STOP LOSS with rationale
+7. RISK ASSESSMENT Low/Medium/High
+8. CONFIDENCE LEVEL percentage
+9. KEY LEVELS TO WATCH
+10. FINAL RECOMMENDATION one clear sentence
+
+IMPORTANT RULES:
+- Be CONSERVATIVE
+- If indicators are mixed, recommend HOLD
+- Always include specific price levels
+- Professional tone, no hype
+"""
+
+def generate_fallback_analysis(signal_data: dict) -> str:
+    """Fallback анализ без ASI"""
+    signal = signal_data.get('signal', 'HOLD')
+    rsi = signal_data.get('rsi', 50)
+    entry = signal_data.get('entry', 0)
+    target = signal_data.get('target', 0)
+    stop = signal_data.get('stop', 0)
+    support = signal_data.get('support', 0)
+    resistance = signal_data.get('resistance', 0)
+    
+    lines = []
+    
+    if signal == "LONG":
+        lines.append("📊 BULLISH SETUP DETECTED")
+        lines.append(f"Price showing strength with RSI at {rsi:.1f}. Entry at ${entry:.2f} with target ${target:.2f}.")
+        lines.append(f"Stop loss at ${stop:.2f}. Key resistance at ${resistance:.2f}.")
+    elif signal == "SHORT":
+        lines.append("📊 BEARISH SETUP DETECTED")
+        lines.append(f"Price showing weakness with RSI at {rsi:.1f}. Entry at ${entry:.2f} with target ${target:.2f}.")
+        lines.append(f"Stop loss at ${stop:.2f}. Key support at ${support:.2f}.")
+    else:
+        lines.append("📊 NEUTRAL MARKET")
+        lines.append(f"RSI at {rsi:.1f} indicates consolidation. Wait for breakout above ${resistance:.2f} or breakdown below ${support:.2f}.")
+    
+    lines.append("\n⚠️ Risk Disclosure: This is NOT financial advice.")
+    return "\n".join(lines)
+
+async def generate_ai_analysis(symbol: str, signal_data: dict) -> str:
+    """Генерация AI анализа через ASI"""
+    prompt = PROFESSIONAL_PROMPT.format(
+        symbol=symbol.replace('USDT', '/USDT'),
+        price=signal_data.get('price', 0),
+        change=signal_data.get('change', 0),
+        rsi=signal_data.get('rsi', 50),
+        ema20=signal_data.get('ema20', 0),
+        ema50=signal_data.get('ema50', 0),
+        volume_ratio=signal_data.get('volume_ratio', 1.0),
+        signal=signal_data.get('signal', 'HOLD'),
+        conviction=signal_data.get('conviction', 'MEDIUM'),
+        entry=signal_data.get('entry', 0),
+        target=signal_data.get('target', 0),
+        stop=signal_data.get('stop', 0),
+        risk_reward=signal_data.get('risk_reward', 0),
+        support=signal_data.get('support', 0),
+        resistance=signal_data.get('resistance', 0),
+        high_24h=signal_data.get('high_24h', 0),
+        low_24h=signal_data.get('low_24h', 0),
+        long_score=signal_data.get('long_score', 0),
+        short_score=signal_data.get('short_score', 0)
+    )
+
+    if not ASI_API_KEY:
+        logger.warning("No ASI API key, using fallback")
+        return generate_fallback_analysis(signal_data)
+
+    for model in ASI_MODELS:
+        try:
+            logger.info(f"Trying ASI model: {model['name']}")
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    "https://api.asi1.ai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {ASI_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": model["id"],
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": "You are a professional crypto trader with 20+ years of experience. Provide conservative, actionable advice."
+                            },
+                            {
+                                "role": "user",
+                                "content": prompt
+                            }
+                        ],
+                        "temperature": 0.4,
+                        "max_tokens": 800,
+                        "top_p": 0.9
+                    }
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    ai_analysis = data["choices"][0]["message"]["content"]
+                    logger.info(f"✅ AI analysis generated via {model['name']}")
+                    return ai_analysis
+                else:
+                    logger.warning(f"ASI {model['name']} error: {response.status_code}")
+                    continue
+
+        except Exception as e:
+            logger.error(f"ASI {model.get('name', 'unknown')} error: {e}")
+            continue
+
+    logger.info("All ASI models failed, using fallback analysis")
+    return generate_fallback_analysis(signal_data)
+
+# ============================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Binance API)
 # ============================================================
 
 async def fetch_binance(endpoint: str, params: dict = None) -> dict:
@@ -206,21 +352,11 @@ async def fetch_binance(endpoint: str, params: dict = None) -> dict:
 
     try:
         if USE_PROXY and PROXY_URL:
-            logger.info(f"Using proxy: {PROXY_HOST}:{PROXY_PORT}")
-            async with httpx.AsyncClient(
-                timeout=15.0,
-                proxy=PROXY_URL
-            ) as client:
-                response = await client.get(
-                    f"{BINANCE_API}/{endpoint}",
-                    params=params
-                )
+            async with httpx.AsyncClient(timeout=15.0, proxy=PROXY_URL) as client:
+                response = await client.get(f"{BINANCE_API}/{endpoint}", params=params)
         else:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(
-                    f"{BINANCE_API}/{endpoint}",
-                    params=params
-                )
+                response = await client.get(f"{BINANCE_API}/{endpoint}", params=params)
 
         if response.status_code != 200:
             logger.error(f"Binance error: {response.status_code}")
@@ -229,20 +365,6 @@ async def fetch_binance(endpoint: str, params: dict = None) -> dict:
         data = response.json()
         _cache[cache_key] = {"data": data, "time": now}
         return data
-
-    except httpx.ProxyError as e:
-        logger.error(f"Proxy error: {e}")
-        logger.info("Retrying without proxy...")
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(
-                f"{BINANCE_API}/{endpoint}",
-                params=params
-            )
-            if response.status_code == 200:
-                data = response.json()
-                _cache[cache_key] = {"data": data, "time": now}
-                return data
-            raise HTTPException(status_code=503, detail="Market data unavailable")
 
     except Exception as e:
         logger.error(f"Request error: {e}")
@@ -254,31 +376,21 @@ async def fetch_ticker(symbol: str) -> dict:
     if cache_key in _cache and now - _cache[cache_key]["time"] < _CACHE_TTL:
         return _cache[cache_key]["data"]
 
-    try:
-        data = await fetch_binance("ticker/24hr", {"symbol": symbol})
-        price = float(data.get("lastPrice", 0))
+    data = await fetch_binance("ticker/24hr", {"symbol": symbol})
+    price = float(data.get("lastPrice", 0))
+    if price == 0:
+        raise HTTPException(status_code=503, detail="Invalid price data")
 
-        if price == 0:
-            raise HTTPException(status_code=503, detail="Invalid price data")
-
-        result = {
-            "price": price,
-            "change": float(data.get("priceChangePercent", 0)),
-            "high": float(data.get("highPrice", 0)),
-            "low": float(data.get("lowPrice", 0)),
-            "volume": float(data.get("volume", 0)),
-            "time": time.time()
-        }
-
-        _cache[cache_key] = {"data": result, "time": now}
-        logger.info(f"{symbol} price: ${price}, change: {result['change']:.2f}%")
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Binance error: {e}")
-        raise HTTPException(status_code=503, detail="Market data unavailable")
+    result = {
+        "price": price,
+        "change": float(data.get("priceChangePercent", 0)),
+        "high": float(data.get("highPrice", 0)),
+        "low": float(data.get("lowPrice", 0)),
+        "volume": float(data.get("volume", 0)),
+        "time": time.time()
+    }
+    _cache[cache_key] = {"data": result, "time": now}
+    return result
 
 async def fetch_klines(symbol: str, interval: str = "1d", limit: int = 50) -> list[dict]:
     cache_key = f"klines_{symbol}_{interval}_{limit}"
@@ -286,34 +398,18 @@ async def fetch_klines(symbol: str, interval: str = "1d", limit: int = 50) -> li
     if cache_key in _cache and now - _cache[cache_key]["time"] < _CACHE_TTL:
         return _cache[cache_key]["data"]
 
-    try:
-        data = await fetch_binance("klines", {
-            "symbol": symbol,
-            "interval": interval,
-            "limit": limit
-        })
+    data = await fetch_binance("klines", {
+        "symbol": symbol,
+        "interval": interval,
+        "limit": limit
+    })
 
-        if not data or len(data) < 5:
-            raise HTTPException(status_code=503, detail="Insufficient historical data")
+    if not data or len(data) < 5:
+        raise HTTPException(status_code=503, detail="Insufficient historical data")
 
-        klines = []
-        for candle in data:
-            klines.append({
-                'close': float(candle[4]),
-                'high': float(candle[2]),
-                'low': float(candle[3]),
-                'volume': float(candle[5]),
-                'time': int(candle[0])
-            })
-
-        _cache[cache_key] = {"data": klines, "time": now}
-        return klines
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Binance klines error: {e}")
-        raise HTTPException(status_code=503, detail="Historical data unavailable")
+    klines = [{'close': float(c[4]), 'high': float(c[2]), 'low': float(c[3]), 'volume': float(c[5]), 'time': int(c[0])} for c in data]
+    _cache[cache_key] = {"data": klines, "time": now}
+    return klines
 
 def calculate_rsi(closes: list[float], period: int = 14) -> float:
     if len(closes) < period + 1:
@@ -327,8 +423,7 @@ def calculate_rsi(closes: list[float], period: int = 14) -> float:
     avg_loss = sum(losses[-period:]) / period
     if avg_loss == 0:
         return 100.0
-    rs = avg_gain / avg_loss
-    return round(100 - (100 / (1 + rs)), 1)
+    return round(100 - (100 / (1 + avg_gain / avg_loss)), 1)
 
 def calculate_ema(prices: list[float], period: int) -> float:
     if not prices:
@@ -345,8 +440,7 @@ def calculate_macd(closes: list[float]) -> tuple[float, float, float]:
     ema12 = calculate_ema(closes, 12)
     ema26 = calculate_ema(closes, 26)
     macd = ema12 - ema26
-    macd_values = [macd]
-    signal = calculate_ema(macd_values, 9) if len(macd_values) >= 9 else macd
+    signal = macd
     histogram = macd - signal
     return round(macd, 2), round(signal, 2), round(histogram, 2)
 
@@ -357,88 +451,28 @@ def calculate_bollinger_bands(closes: list[float], period: int = 20, std_dev: fl
     middle = sum(recent) / period
     variance = sum((x - middle) ** 2 for x in recent) / period
     std = variance ** 0.5
-    upper = middle + std_dev * std
-    lower = middle - std_dev * std
-    return round(upper, 2), round(middle, 2), round(lower, 2)
+    return round(middle + std_dev * std, 2), round(middle, 2), round(middle - std_dev * std, 2)
 
-def detect_rsi_divergence(rsi: float, closes: list[float]) -> str:
-    if len(closes) < 10:
-        return 'none'
-    recent_closes = closes[-10:]
-    price_trend = recent_closes[-1] - recent_closes[0]
-    if price_trend < 0 and rsi > 50:
-        return 'bullish'
-    elif price_trend > 0 and rsi < 50:
-        return 'bearish'
-    return 'none'
-
-def calculate_pivot_points(high: float, low: float, close: float) -> dict:
-    pivot = (high + low + close) / 3
-    r1 = 2 * pivot - low
-    s1 = 2 * pivot - high
-    r2 = pivot + (high - low)
-    s2 = pivot - (high - low)
-    return {
-        'pivot': round(pivot, 2),
-        'r1': round(r1, 2),
-        's1': round(s1, 2),
-        'r2': round(r2, 2),
-        's2': round(s2, 2)
-    }
-
-def get_signal_from_factors(rsi: float, price_ema20: float, price_ema50: float,
-                           volume_ratio: float, high_low_range: float,
-                           macd: float, macd_signal: float, macd_hist: float,
-                           bb_upper: float, bb_middle: float, bb_lower: float,
-                           rsi_divergence: str, pivot: dict) -> tuple[str, str, int, int]:
+def get_signal_from_factors(rsi: float, ema20: float, ema50: float, volume_ratio: float, 
+                           high_low_range: float, macd: float, macd_signal: float, 
+                           macd_hist: float) -> tuple[str, str, float, float]:
     long_score = short_score = 0
-
+    
     if rsi < 30: long_score += 2
     elif rsi > 70: short_score += 2
     elif rsi < 40: long_score += 1
     elif rsi > 60: short_score += 1
-
-    if price_ema20 > price_ema50:
-        long_score += 1
-    else:
-        short_score += 1
-
-    if macd > macd_signal and macd_hist > 0:
-        long_score += 1
-    elif macd < macd_signal and macd_hist < 0:
-        short_score += 1
-
-    if bb_upper > 0 and bb_lower > 0:
-        bb_position = (bb_middle - bb_lower) / (bb_upper - bb_lower) if bb_upper != bb_lower else 0.5
-        if bb_position < 0.2:
-            long_score += 1
-        elif bb_position > 0.8:
-            short_score += 1
-
+    
+    if ema20 > ema50: long_score += 1
+    else: short_score += 1
+    
+    if macd > macd_signal and macd_hist > 0: long_score += 1
+    elif macd < macd_signal and macd_hist < 0: short_score += 1
+    
     if volume_ratio > 1.5:
-        if long_score > short_score:
-            long_score += 1
-        else:
-            short_score += 1
-
-    if rsi_divergence == 'bullish':
-        long_score += 1
-    elif rsi_divergence == 'bearish':
-        short_score += 1
-
-    if high_low_range > 0.03:
-        if long_score > short_score:
-            long_score += 1
-        else:
-            short_score += 1
-
-    if pivot:
-        current_price = bb_middle
-        if current_price > pivot['pivot']:
-            long_score += 0.5
-        else:
-            short_score += 0.5
-
+        if long_score > short_score: long_score += 1
+        else: short_score += 1
+    
     if long_score >= 4:
         return "LONG", "🚀 Strong Bullish Setup", long_score, short_score
     elif short_score >= 4:
@@ -459,7 +493,7 @@ def format_price(price: float) -> str:
     return f"${price:.6f}"
 
 # ============================================================
-# ГЛАВНЫЙ API — POST ОБРАБОТЧИК
+# ГЛАВНЫЙ POST ЭНДПОИНТ
 # ============================================================
 
 @app.post("/")
@@ -470,7 +504,6 @@ async def crypto_snapshot(request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
     symbol = body.get("symbol", "").strip()
-
     if not symbol:
         return JSONResponse({
             "error": "Symbol required",
@@ -488,10 +521,8 @@ async def crypto_snapshot(request: Request):
 # ============================================================
 
 async def generate_signal(symbol: str) -> str:
-    """Генерирует торговый сигнал для указанного символа."""
     try:
-        symbol = symbol.upper()
-        symbol = symbol.replace("USDT", "").replace("USD", "").replace("NODE", "")
+        symbol = symbol.upper().replace("USDT", "").replace("USD", "")
         symbol = f"{symbol}USDT"
 
         ticker = await fetch_ticker(symbol)
@@ -516,14 +547,10 @@ async def generate_signal(symbol: str) -> str:
         high_low_range = (high_24h - low_24h) / low_24h if low_24h > 0 else 0
 
         macd, macd_signal, macd_hist = calculate_macd(closes)
-        bb_upper, bb_middle, bb_lower = calculate_bollinger_bands(closes)
-        rsi_divergence = detect_rsi_divergence(rsi, closes)
-        pivot = calculate_pivot_points(high_24h, low_24h, current_price)
 
         signal, signal_desc, long_score, short_score = get_signal_from_factors(
             rsi, ema20, ema50, volume_ratio, high_low_range,
-            macd, macd_signal, macd_hist, bb_upper, bb_middle, bb_lower,
-            rsi_divergence, pivot
+            macd, macd_signal, macd_hist
         )
 
         atr_proxy = high_low_range * current_price
@@ -549,16 +576,34 @@ async def generate_signal(symbol: str) -> str:
         total_score = long_score + short_score
         conviction = "VERY HIGH" if total_score >= 5 else "HIGH" if total_score >= 4 else "MEDIUM" if total_score >= 3 else "LOW"
 
-        if rsi < 30:
-            rsi_status = "oversold"
-        elif rsi > 70:
-            rsi_status = "overbought"
-        else:
-            rsi_status = "neutral"
+        signal_data = {
+            'price': current_price,
+            'change': change_24h,
+            'rsi': rsi,
+            'ema20': ema20,
+            'ema50': ema50,
+            'volume_ratio': volume_ratio,
+            'signal': signal,
+            'conviction': conviction,
+            'entry': entry,
+            'target': target,
+            'stop': stop,
+            'risk_reward': risk_reward,
+            'support': support,
+            'resistance': resistance,
+            'high_24h': high_24h,
+            'low_24h': low_24h,
+            'long_score': long_score,
+            'short_score': short_score
+        }
+
+        # Генерируем AI анализ через ASI
+        ai_analysis = await generate_ai_analysis(symbol, signal_data)
 
         result = f"""
 ╔══════════════════════════════════════════════════════════════════╗
 ║  📊 CRYPTO SNAPSHOT PRO — {symbol.replace('USDT', '/USDT')}          ║
+║  🤖 Powered by ASI (Artificial Superintelligence)              ║
 ╚══════════════════════════════════════════════════════════════════╝
 
 ╔══════════════════════════════════════════════════════════════════╗
@@ -566,14 +611,13 @@ async def generate_signal(symbol: str) -> str:
 ╠══════════════════════════════════════════════════════════════════╣
 ║  {signal_desc} ║
 ║  Conviction: {conviction:<10}  |  Score: {long_score:.1f}🟢LONG / {short_score:.1f}🔴SHORT    ║
-║  Reason: {'Bullish factors dominate.' if long_score > short_score else 'Bearish factors dominate.' if short_score > long_score else 'Mixed signals. Wait for confirmation.'} ║
 ╚══════════════════════════════════════════════════════════════════╝
 
 ╔══════════════════════════════════════════════════════════════════╗
 ║  📈 TECHNICAL INDICATORS                                       ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Price:  {format_price(current_price):<20}  24h Change: {change_24h:+.2f}% ║
-║  RSI(14): {rsi:.1f} ({rsi_status}){' ' * (40 - len(f'{rsi:.1f} ({rsi_status})'))}║
+║  RSI(14): {rsi:.1f}{' ' * (40 - len(f'{rsi:.1f}'))}║
 ║  EMA(20): {format_price(ema20):<20}  EMA(50): {format_price(ema50)} ║
 ║  Volume Ratio: {volume_ratio:.2f}x{' ' * (30 - len(f'{volume_ratio:.2f}x'))}║
 ╚══════════════════════════════════════════════════════════════════╝
@@ -586,6 +630,12 @@ async def generate_signal(symbol: str) -> str:
 ╚══════════════════════════════════════════════════════════════════╝
 
 ╔══════════════════════════════════════════════════════════════════╗
+║  🤖 PROFESSIONAL AI ANALYSIS (ASI)                             ║
+╠══════════════════════════════════════════════════════════════════╣
+{ai_analysis}
+╚══════════════════════════════════════════════════════════════════╝
+
+╔══════════════════════════════════════════════════════════════════╗
 ║  📌 KEY LEVELS                                                ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Support:  {format_price(support):<20}  Resistance: {format_price(resistance)} ║
@@ -594,7 +644,6 @@ async def generate_signal(symbol: str) -> str:
 
 ⚠️  Risk Disclosure: This is NOT financial advice. Always manage risk.
 """
-
         return result
 
     except HTTPException:
@@ -604,7 +653,7 @@ async def generate_signal(symbol: str) -> str:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 # ============================================================
-# БАЛАНС
+# BALANCE API
 # ============================================================
 
 ALCHEMY_URL = os.getenv("ALCHEMY_URL", "https://base-mainnet.g.alchemy.com/v2/U8khpdvO0rAwu9ojyBOpr")
@@ -617,7 +666,6 @@ class BalanceRequest(BaseModel):
 async def get_balance(request: BalanceRequest):
     try:
         address = request.address
-
         if not address or not address.startswith("0x") or len(address) != 42:
             return {"error": "Invalid address", "balance": "0"}
 
@@ -631,18 +679,14 @@ async def get_balance(request: BalanceRequest):
                 }, "latest"],
                 "id": 1
             }
-
             response = await client.post(ALCHEMY_URL, json=data)
-
             if response.status_code == 200:
                 result = response.json()
                 if "result" in result and result["result"] != "0x":
                     balance_wei = int(result["result"], 16)
                     balance = balance_wei / 10**6
                     return {"balance": str(balance), "usdc": balance}
-
             return {"balance": "0"}
-
     except Exception as e:
         logger.error(f"Balance error: {e}")
         return {"balance": "0", "error": str(e)}
@@ -657,4 +701,11 @@ async def get_balance_get(address: str):
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "crypto-snapshot-pro", "proxy_enabled": USE_PROXY}
+    return {
+        "status": "ok",
+        "service": "crypto-snapshot-pro",
+        "version": "2.0.0",
+        "proxy_enabled": USE_PROXY,
+        "asi_enabled": bool(ASI_API_KEY),
+        "asi_models": ASI_MODELS
+    }
