@@ -1,5 +1,6 @@
 """
-Crypto Snapshot Pro — x402 Agent (Bankr) - С ПОДДЕРЖКОЙ ПЛАТЕЖЕЙ
+Crypto Snapshot Pro — Bankr Agent (БЕЗ X402 ЛОГИКИ)
+Bankr сам обрабатывает платежи
 """
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -12,8 +13,6 @@ import logging
 import sys
 import os
 from dotenv import load_dotenv
-from eth_account import Account
-from eth_account.messages import encode_defunct
 
 # ============================================================
 # ЗАГРУЗКА ПЕРЕМЕННЫХ И ЛОГГЕР
@@ -32,11 +31,6 @@ logger = logging.getLogger("crypto-snapshot")
 # ============================================================
 # ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
 # ============================================================
-
-# ТВОЙ КОШЕЛЕК ДЛЯ ПОЛУЧЕНИЯ USDC
-PAYTO_ADDRESS = os.getenv("PAYTO_ADDRESS", "0x08E4D3F8098c388046c37f5b0Bf7B11042b9b2b5")
-USDC_ADDRESS = "0x5b7efd37546d6BB02463339cEaDdD80997aC97B3"
-PRICE_AMOUNT = "25000"  # 0.025 USDC
 
 # ПРОКСИ
 USE_PROXY = os.getenv("PROXY_ENABLED", "false").lower() == "true"
@@ -144,7 +138,7 @@ async def mcp_handler(request: Request):
                             "id": request_id,
                             "error": {
                                 "code": response.status_code,
-                                "message": "Payment required or API error"
+                                "message": "API error"
                             }
                         }
 
@@ -183,14 +177,8 @@ async def root():
     return JSONResponse({
         "service": "Crypto Snapshot Pro",
         "status": "active",
-        "payment": {
-            "price": "0.025 USDC",
-            "network": "Base",
-            "payTo": PAYTO_ADDRESS,
-            "usdc": USDC_ADDRESS
-        },
         "endpoints": {
-            "POST /": "Get crypto signal (requires payment)",
+            "POST /": "Get crypto signal",
             "GET /health": "Health check"
         }
     })
@@ -339,22 +327,12 @@ async def generate_ai_analysis(symbol: str, signal_data: dict) -> str:
     return generate_fallback_analysis(signal_data)
 
 # ============================================================
-# X402 ПЛАТЕЖНАЯ ЛОГИКА
+# ОСНОВНОЙ ОБРАБОТЧИК (БЕЗ ПЛАТЕЖЕЙ)
 # ============================================================
-
-def verify_signature(message: str, signature: str, expected_address: str) -> bool:
-    """Проверяет подпись EIP-191"""
-    try:
-        message_hash = encode_defunct(text=message)
-        recovered = Account.recover_message(message_hash, signature=signature)
-        return recovered.lower() == expected_address.lower()
-    except Exception as e:
-        logger.error(f"Signature verification error: {e}")
-        return False
 
 @app.post("/")
 async def crypto_snapshot(request: Request):
-    """POST — генерирует сигнал с проверкой x402 платежа"""
+    """POST — генерирует сигнал (Bankr обрабатывает платежи)"""
     
     try:
         body = await request.json()
@@ -363,86 +341,13 @@ async def crypto_snapshot(request: Request):
 
     symbol = body.get("symbol", "").strip()
     
-    # Проверяем, есть ли подпись платежа
-    payment_signature = request.headers.get("PAYMENT-SIGNATURE")
-    payment_metadata = request.headers.get("PAYMENT-METADATA")
-    
-    # Если подписи нет — требуем оплату
-    if not payment_signature:
-        logger.info(f"💰 Payment required for symbol: {symbol}")
-        return Response(
-            status_code=402,
-            headers={
-                "PAYMENT-REQUIRED": json.dumps({
-                    "x402Version": 2,
-                    "resource": {
-                        "url": str(request.url),
-                        "description": "Crypto Snapshot Pro - AI-powered trading signal",
-                        "mimeType": "application/json"
-                    },
-                    "accepts": [{
-                        "scheme": "exact",
-                        "network": "eip155:8453",
-                        "amount": PRICE_AMOUNT,
-                        "asset": USDC_ADDRESS,
-                        "payTo": PAYTO_ADDRESS,
-                        "maxTimeoutSeconds": 300
-                    }]
-                })
-            },
-            content=json.dumps({"status": "Payment Required"}),
-            media_type="application/json"
-        )
-    
-    # Проверяем подпись
-    # Формируем сообщение для проверки
-    message = f"Pay {PRICE_AMOUNT} USDC to {PAYTO_ADDRESS} on Base for Crypto Snapshot Pro: {symbol}"
-    
-    # Ожидаемый адрес плательщика (из метаданных)
-    if payment_metadata:
-        try:
-            metadata = json.loads(payment_metadata)
-            payer_address = metadata.get("from", "")
-        except:
-            payer_address = ""
-    else:
-        payer_address = ""
-    
-    # Если не удалось получить адрес из метаданных, пробуем восстановить из подписи
-    if not payer_address:
-        try:
-            message_hash = encode_defunct(text=message)
-            recovered = Account.recover_message(message_hash, signature=payment_signature)
-            payer_address = recovered
-        except:
-            payer_address = ""
-    
-    if not payer_address:
-        logger.warning("⚠️ Could not verify payment signature")
-        return Response(
-            status_code=402,
-            content=json.dumps({"error": "Invalid payment signature"}),
-            media_type="application/json"
-        )
-    
-    # Проверяем подпись
-    if not verify_signature(message, payment_signature, payer_address):
-        logger.warning(f"⚠️ Invalid signature for {payer_address}")
-        return Response(
-            status_code=402,
-            content=json.dumps({"error": "Invalid payment signature"}),
-            media_type="application/json"
-        )
-    
-    logger.info(f"✅ Payment verified for {payer_address}, symbol: {symbol}")
-    
-    # Генерируем сигнал
     if not symbol:
         return JSONResponse({
             "error": "Symbol required",
             "example": {"symbol": "BTC"}
         })
     
+    logger.info(f"📊 Generating signal for: {symbol}")
     result = await generate_signal(symbol)
     return JSONResponse({
         "symbol": symbol,
@@ -788,7 +693,5 @@ async def health_check():
     return {
         "status": "ok",
         "service": "crypto-snapshot-pro",
-        "proxy_enabled": USE_PROXY,
-        "payto": PAYTO_ADDRESS,
-        "price": f"{int(PRICE_AMOUNT)/1000000:.3f} USDC"
+        "proxy_enabled": USE_PROXY
     }
