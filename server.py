@@ -1,10 +1,9 @@
 """
-Crypto Snapshot Pro — x402 Agent (Bankr) - ТОЛЬКО СИГНАЛЫ
+Crypto Snapshot Pro — Bankr Agent (ТОЛЬКО СИГНАЛЫ, БЕЗ СТАТИКИ)
 """
 
-from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import httpx
 import time
@@ -34,8 +33,6 @@ logger = logging.getLogger("crypto-snapshot")
 # ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
 # ============================================================
 
-AGENTICMARKET_SECRET = os.getenv("AGENTICMARKET_SECRET", "")
-
 # ПРОКСИ
 USE_PROXY = os.getenv("PROXY_ENABLED", "false").lower() == "true"
 PROXY_HOST = os.getenv("PROXY_HOST")
@@ -55,13 +52,6 @@ _cache = {}
 _CACHE_TTL = 60
 
 MIN_AMOUNT = 25000
-
-# ============================================================
-# ПРОВЕРКА ТОКЕНА (ОТКЛЮЧЕНА)
-# ============================================================
-
-def verify_agentic_token(request: Request) -> bool:
-    return True
 
 # ============================================================
 # СОЗДАЕМ ГЛАВНОЕ ПРИЛОЖЕНИЕ
@@ -182,310 +172,26 @@ app.mount("/mcp", mcp_app)
 logger.info("✅ MCP server mounted at /mcp")
 
 # ============================================================
-# ГЛАВНАЯ СТРАНИЦА — МИНИМАЛЬНЫЙ ОТВЕТ (BANKR САМ ДОБАВИТ ПАРАМЕТРЫ)
+# ГЛАВНАЯ СТРАНИЦА — ПРОСТОЙ JSON (БЕЗ РЕДИРЕКТОВ И СТАТИКИ)
 # ============================================================
 
 @app.get("/")
-async def root(request: Request):
-    accept_header = request.headers.get("accept", "")
-    if "text/html" in accept_header:
-        return RedirectResponse(url="/app")
-    
-    # ✅ Bankr сам подставит свои платежные параметры
-    return Response(
-        status_code=402,
-        content=json.dumps({"status": "Payment Required"}),
-        media_type="application/json"
-    )
-
-# ============================================================
-# ЯНДЕКС ВЕРИФИКАЦИЯ
-# ============================================================
-
-@app.get("/yandex_d100e212bdd18c7b.html")
-async def yandex_verify():
-    return HTMLResponse("""
-    <html>
-        <head>
-            <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-        </head>
-        <body>Verification: d100e212bdd18c7b</body>
-    </html>
-    """)
-
-# ============================================================
-# ПЕРЕМЕННЫЕ И ФУНКЦИИ
-# ============================================================
-
-ASI_API_KEY = os.getenv("ASI_API_KEY", "")
-ASI_MODELS = [
-    {"id": "asi1", "name": "ASI1"},
-    {"id": "asi1-mini", "name": "ASI1 Mini"}
-]
-
-PROFESSIONAL_PROMPT = """
-You are a professional crypto trader with 20+ years of experience managing institutional portfolios.
-You provide conservative, data-driven trading advice with clear risk management.
-
-Based on the technical analysis below, provide a professional trading recommendation:
-
-TECHNICAL DATA:
-Symbol: {symbol}
-Current Price: ${price}
-24h Change: {change}%
-RSI(14): {rsi}
-EMA(20): ${ema20}
-EMA(50): ${ema50}
-Volume Ratio: {volume_ratio}x
-Signal: {signal}
-Conviction: {conviction}
-Entry: ${entry}
-Target: ${target}
-Stop: ${stop}
-Risk/Reward: 1:{risk_reward}
-Support: ${support}
-Resistance: ${resistance}
-24h High: ${high_24h}
-24h Low: ${low_24h}
-Long Score: {long_score}
-Short Score: {short_score}
-
-YOUR ANALYSIS MUST INCLUDE:
-1. MARKET ASSESSMENT (2-3 sentences)
-2. TRADE RECOMMENDATION: LONG / SHORT / HOLD
-3. PRICE PREDICTION 24H with percentage
-4. ENTRY ZONE
-5. TARGET LEVELS T1 and T2
-6. STOP LOSS with rationale
-7. RISK ASSESSMENT Low/Medium/High
-8. CONFIDENCE LEVEL percentage
-9. KEY LEVELS TO WATCH
-10. FINAL RECOMMENDATION one clear sentence
-
-IMPORTANT RULES:
-- Be CONSERVATIVE
-- If indicators are mixed, recommend HOLD
-- Always include specific price levels
-- Professional tone, no hype
-"""
-
-def generate_fallback_analysis(signal_data: dict) -> str:
-    signal = signal_data.get('signal', 'HOLD')
-    rsi = signal_data.get('rsi', 50)
-    price = signal_data.get('price', 0)
-    change = signal_data.get('change', 0)
-    volume_ratio = signal_data.get('volume_ratio', 1.0)
-    conviction = signal_data.get('conviction', 'MEDIUM')
-    entry = signal_data.get('entry', 0)
-    target = signal_data.get('target', 0)
-    stop = signal_data.get('stop', 0)
-    risk_reward = signal_data.get('risk_reward', 0)
-    support = signal_data.get('support', 0)
-    resistance = signal_data.get('resistance', 0)
-    ema20 = signal_data.get('ema20', 0)
-    ema50 = signal_data.get('ema50', 0)
-
-    lines = []
-
-    if signal == "LONG":
-        lines.append("📊 MARKET ASSESSMENT:")
-        lines.append(f"Bullish momentum detected with price above EMA(20) and EMA(50). RSI at {rsi:.1f} suggests {'strong' if rsi < 70 else 'moderate'} buying pressure. Volume {'confirms' if volume_ratio > 1.5 else 'does not fully confirm'} the move.")
-    elif signal == "SHORT":
-        lines.append("📊 MARKET ASSESSMENT:")
-        lines.append(f"Bearish signals present with {'overbought RSI' if rsi > 70 else 'weakening momentum'}. Price showing signs of exhaustion. Volume {'supports' if volume_ratio > 1.5 else 'does not strongly support'} downside.")
-    else:
-        lines.append("📊 MARKET ASSESSMENT:")
-        lines.append(f"Mixed signals with RSI at {rsi:.1f} (neutral). Price trading between support and resistance. Wait for clear breakout or breakdown.")
-
-    rec = "LONG" if signal == "LONG" else "SHORT" if signal == "SHORT" else "HOLD"
-    reason = f"Technical indicators {'strongly' if conviction in ['VERY HIGH', 'HIGH'] else 'moderately'} support this position."
-    lines.append(f"\n🎯 RECOMMENDATION: {rec}")
-    lines.append(reason)
-
-    if signal == "LONG":
-        pred = f"+{2 + (rsi / 100) * 3:.1f}%"
-        direction = "UP"
-    elif signal == "SHORT":
-        pred = f"-{2 + ((100 - rsi) / 100) * 3:.1f}%"
-        direction = "DOWN"
-    else:
-        pred = f"±{(rsi / 100) * 2:.1f}%"
-        direction = "SIDEWAYS"
-    lines.append(f"\n📈 24H PRICE PREDICTION:")
-    lines.append(f"Price expected to move {direction} by approximately {pred}")
-
-    lines.append(f"\n📍 ENTRY ZONE: ${entry:.2f}")
-    if signal == "LONG":
-        t1 = entry * 1.03
-        t2 = entry * 1.05
-        sl = entry * 0.97
-        lines.append(f"🎯 TARGET 1: ${t1:.2f} (+3%)")
-        lines.append(f"🎯 TARGET 2: ${t2:.2f} (+5%)")
-        lines.append(f"🛑 STOP LOSS: ${sl:.2f} (-3%)")
-    elif signal == "SHORT":
-        t1 = entry * 0.97
-        t2 = entry * 0.95
-        sl = entry * 1.03
-        lines.append(f"🎯 TARGET 1: ${t1:.2f} (-3%)")
-        lines.append(f"🎯 TARGET 2: ${t2:.2f} (-5%)")
-        lines.append(f"🛑 STOP LOSS: ${sl:.2f} (+3%)")
-    else:
-        lines.append(f"🎯 TARGET: ${target:.2f}")
-        lines.append(f"🛑 STOP: ${stop:.2f}")
-
-    risk = "Low" if conviction in ["VERY HIGH", "HIGH"] else "Medium" if conviction == "MEDIUM" else "High"
-    risk_note = "Strong technical confirmation" if conviction in ["VERY HIGH", "HIGH"] else "Mixed signals present" if conviction == "MEDIUM" else "Weak confirmation"
-    lines.append(f"\n⚠️ RISK: {risk}")
-    lines.append(f"{risk_note} - Position sizing recommended.")
-
-    conf = 85 if conviction == "VERY HIGH" else 70 if conviction == "HIGH" else 55 if conviction == "MEDIUM" else 40
-    lines.append(f"\n🎯 CONFIDENCE: {conf}%")
-
-    lines.append(f"\n📌 KEY LEVELS:")
-    lines.append(f"  Support: ${support:.2f}")
-    lines.append(f"  Resistance: ${resistance:.2f}")
-
-    if signal == "LONG":
-        final = f"Consider LONG position with entry at ${entry:.2f}, target ${t1:.2f}, stop ${sl:.2f}. Monitor resistance at ${resistance:.2f} for potential exit."
-    elif signal == "SHORT":
-        final = f"Consider SHORT position with entry at ${entry:.2f}, target ${t1:.2f}, stop ${sl:.2f}. Monitor support at ${support:.2f} for potential exit."
-    else:
-        final = f"Recommend HOLD. Wait for clear breakout above ${resistance:.2f} or breakdown below ${support:.2f} before entering."
-
-    lines.append(f"\n💡 FINAL RECOMMENDATION:")
-    lines.append(final)
-
-    return "\n".join(lines)
-
-async def generate_ai_analysis(symbol: str, signal_data: dict) -> str:
-    prompt = PROFESSIONAL_PROMPT.format(
-        symbol=symbol.replace('USDT', '/USDT'),
-        price=signal_data.get('price', 0),
-        change=signal_data.get('change', 0),
-        rsi=signal_data.get('rsi', 50),
-        ema20=signal_data.get('ema20', 0),
-        ema50=signal_data.get('ema50', 0),
-        volume_ratio=signal_data.get('volume_ratio', 1.0),
-        signal=signal_data.get('signal', 'HOLD'),
-        conviction=signal_data.get('conviction', 'MEDIUM'),
-        entry=signal_data.get('entry', 0),
-        target=signal_data.get('target', 0),
-        stop=signal_data.get('stop', 0),
-        risk_reward=signal_data.get('risk_reward', 0),
-        support=signal_data.get('support', 0),
-        resistance=signal_data.get('resistance', 0),
-        high_24h=signal_data.get('high_24h', 0),
-        low_24h=signal_data.get('low_24h', 0),
-        long_score=signal_data.get('long_score', 0),
-        short_score=signal_data.get('short_score', 0)
-    )
-
-    for model in ASI_MODELS:
-        try:
-            if not ASI_API_KEY:
-                logger.warning("No ASI API key, using fallback")
-                return generate_fallback_analysis(signal_data)
-
-            logger.info(f"Trying ASI model: {model['name']}")
-
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    "https://api.asi1.ai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {ASI_API_KEY}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "model": model["id"],
-                        "messages": [
-                            {
-                                "role": "system",
-                                "content": "You are a professional crypto trader with 20+ years of experience. Provide conservative, actionable advice."
-                            },
-                            {
-                                "role": "user",
-                                "content": prompt
-                            }
-                        ],
-                        "temperature": 0.4,
-                        "max_tokens": 800,
-                        "top_p": 0.9
-                    }
-                )
-
-                if response.status_code == 200:
-                    data = response.json()
-                    ai_analysis = data["choices"][0]["message"]["content"]
-                    logger.info(f"AI analysis generated via {model['name']}")
-                    return ai_analysis
-                else:
-                    logger.warning(f"ASI {model['name']} error: {response.status_code}")
-                    continue
-
-        except Exception as e:
-            logger.error(f"ASI {model.get('name', 'unknown')} error: {e}")
-            continue
-
-    logger.info("All ASI models failed, using fallback analysis")
-    return generate_fallback_analysis(signal_data)
-
-ALCHEMY_URL = os.getenv("ALCHEMY_URL", "https://base-mainnet.g.alchemy.com/v2/U8khpdvO0rAwu9ojyBOpr")
-USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-PAYTO_ADDRESS = "0x5b7efd37546d6BB02463339cEaDdD80997aC97B3"
-paid_tx_cache = {}
-
-async def verify_tx_payment(tx_hash: str) -> bool:
-    if tx_hash in paid_tx_cache:
-        return paid_tx_cache[tx_hash]
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(
-                ALCHEMY_URL,
-                json={
-                    "jsonrpc": "2.0",
-                    "method": "eth_getTransactionReceipt",
-                    "params": [tx_hash],
-                    "id": 1
-                }
-            )
-
-            if response.status_code != 200:
-                paid_tx_cache[tx_hash] = False
-                return False
-
-            data = response.json()
-            receipt = data.get("result")
-
-            if not receipt or receipt.get("status") != "0x1":
-                paid_tx_cache[tx_hash] = False
-                return False
-
-            logs = receipt.get("logs", [])
-            for log in logs:
-                if log.get("address", "").lower() == USDC_ADDRESS.lower():
-                    topics = log.get("topics", [])
-                    if len(topics) >= 3:
-                        to_address = "0x" + topics[2][-40:]
-                        if to_address.lower() == PAYTO_ADDRESS.lower():
-                            paid_tx_cache[tx_hash] = True
-                            logger.info(f"Payment verified for tx: {tx_hash}")
-                            return True
-
-            paid_tx_cache[tx_hash] = False
-            return False
-
-    except Exception as e:
-        logger.error(f"TX verification error: {e}")
-        paid_tx_cache[tx_hash] = False
-        return False
-
-class AgentResponse(BaseModel):
-    message: dict
-
-# ============================================================
-# ❌ ВЕСЬ X402 УДАЛЕН - BANKR САМ ОБРАБАТЫВАЕТ ПЛАТЕЖИ!
-# ============================================================
+async def root():
+    return JSONResponse({
+        "service": "Crypto Snapshot Pro (Bankr Agent)",
+        "status": "active",
+        "endpoints": {
+            "POST /": "Generate crypto signal (requires symbol)",
+            "GET /health": "Health check",
+            "POST /api/balance": "Check USDC balance",
+            "GET /api/balance/{address}": "Check USDC balance"
+        },
+        "usage": {
+            "method": "POST",
+            "body": {"symbol": "BTC"},
+            "example": "curl -X POST https://crypto-snapshot-bankr-agent.onrender.com/ -H 'Content-Type: application/json' -d '{\"symbol\":\"BTC\"}'"
+        }
+    })
 
 # ============================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -753,17 +459,11 @@ def format_price(price: float) -> str:
     return f"${price:.6f}"
 
 # ============================================================
-# ГЛАВНЫЙ API — POST ОБРАБОТЧИК (ТОЛЬКО СИГНАЛЫ, БЕЗ X402)
+# ГЛАВНЫЙ API — POST ОБРАБОТЧИК
 # ============================================================
 
 @app.post("/")
 async def crypto_snapshot(request: Request):
-    """
-    POST — генерирует сигнал.
-    Bankr сам обрабатывает оплату и вызывает этот эндпоинт ТОЛЬКО ПОСЛЕ ОПЛАТЫ.
-    НИКАКОЙ X402 ЛОГИКИ ЗДЕСЬ НЕ НУЖНО!
-    """
-
     try:
         body = await request.json()
     except:
@@ -771,41 +471,17 @@ async def crypto_snapshot(request: Request):
 
     symbol = body.get("symbol", "").strip()
 
-    # ============================================================
-    # ✅ ВЕБ-ИНТЕРФЕЙС — ОСТАВЛЯЕМ КАК ЕСТЬ!
-    # ============================================================
-    tx_hash = body.get("tx_hash")
-    if tx_hash:
-        logger.info(f"🔍 Verifying tx: {tx_hash}")
-        if not await verify_tx_payment(tx_hash):
-            return Response(
-                content="Payment verification failed. Transaction not found or invalid.",
-                status_code=402
-            )
-        logger.info(f"✅ Tx {tx_hash} verified")
-        result = await generate_signal(symbol or "BTC")
-        return AgentResponse(message={"role": "assistant", "content": result})
-
-    # ============================================================
-    # ❌ X402 (ДЛЯ АГЕНТОВ) — ПОЛНОСТЬЮ УДАЛЕН!
-    #    Bankr сам обрабатывает оплату.
-    #    Этот эндпоинт вызывается ТОЛЬКО ПОСЛЕ ОПЛАТЫ.
-    # ============================================================
-
-    # ============================================================
-    # ЕСЛИ НЕТ symbol — ПОДСКАЗКА
-    # ============================================================
     if not symbol:
-        return AgentResponse(message={
-            "role": "assistant",
-            "content": "📊 CRYPTO SNAPSHOT PRO\n\nSend a symbol to analyze.\n\nExamples:\n• BTC\n• ETH\n• SOL\n• DOGE\n• XRP\n\nUsage: POST {\"symbol\": \"BTC\"}"
+        return JSONResponse({
+            "error": "Symbol required",
+            "example": {"symbol": "BTC"}
         })
 
-    # ============================================================
-    # ГЕНЕРИРУЕМ СИГНАЛ
-    # ============================================================
     result = await generate_signal(symbol)
-    return AgentResponse(message={"role": "assistant", "content": result})
+    return JSONResponse({
+        "symbol": symbol,
+        "analysis": result
+    })
 
 # ============================================================
 # ГЕНЕРАЦИЯ СИГНАЛА
@@ -880,29 +556,6 @@ async def generate_signal(symbol: str) -> str:
         else:
             rsi_status = "neutral"
 
-        signal_data = {
-            'price': current_price,
-            'change': change_24h,
-            'rsi': rsi,
-            'ema20': ema20,
-            'ema50': ema50,
-            'volume_ratio': volume_ratio,
-            'signal': signal,
-            'conviction': conviction,
-            'entry': entry,
-            'target': target,
-            'stop': stop,
-            'risk_reward': risk_reward,
-            'support': support,
-            'resistance': resistance,
-            'high_24h': high_24h,
-            'low_24h': low_24h,
-            'long_score': long_score,
-            'short_score': short_score
-        }
-
-        ai_analysis = await generate_ai_analysis(symbol, signal_data)
-
         result = f"""
 ╔══════════════════════════════════════════════════════════════════╗
 ║  📊 CRYPTO SNAPSHOT PRO — {symbol.replace('USDT', '/USDT')}          ║
@@ -933,24 +586,13 @@ async def generate_signal(symbol: str) -> str:
 ╚══════════════════════════════════════════════════════════════════╝
 
 ╔══════════════════════════════════════════════════════════════════╗
-║  🤖 PROFESSIONAL AI ANALYSIS                                   ║
-╠══════════════════════════════════════════════════════════════════╣
-{ai_analysis}
-╚══════════════════════════════════════════════════════════════════╝
-
-╔══════════════════════════════════════════════════════════════════╗
 ║  📌 KEY LEVELS                                                ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Support:  {format_price(support):<20}  Resistance: {format_price(resistance)} ║
 ║  24h High: {format_price(high_24h):<20}  24h Low:  {format_price(low_24h)} ║
 ╚══════════════════════════════════════════════════════════════════╝
 
-📚 Resources:
-📖 Full Guide: https://gist.github.com/Matros777/c5d95532248eaaf2b86fd04f8a2753b7
-🐦 Twitter: https://x.com/VitalijMatros
-🌐 OpenX402: https://openx402.ai/projects/0x5b7efd37546d6bb02463339ceaddd80997ac97b3
-
-⚠️  Risk Disclosure: This is NOT financial advice. Always manage risk. Past performance does not guarantee future results.
+⚠️  Risk Disclosure: This is NOT financial advice. Always manage risk.
 """
 
         return result
@@ -961,23 +603,12 @@ async def generate_signal(symbol: str) -> str:
         logger.error(f"Error: {e}")
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-@app.get("/app")
-async def web_app():
-    try:
-        with open("static/index.html", "r", encoding="utf-8") as f:
-            return HTMLResponse(f.read())
-    except FileNotFoundError:
-        return HTMLResponse("<h1>Web interface not found</h1>", status_code=404)
-
-@app.get("/health")
-async def health_check():
-    return {"status": "ok", "service": "crypto-snapshot-pro", "proxy_enabled": USE_PROXY}
-
 # ============================================================
-# ЭНДПОИНТ ДЛЯ БАЛАНСА
+# БАЛАНС
 # ============================================================
+
+ALCHEMY_URL = os.getenv("ALCHEMY_URL", "https://base-mainnet.g.alchemy.com/v2/U8khpdvO0rAwu9ojyBOpr")
+USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 
 class BalanceRequest(BaseModel):
     address: str
@@ -1019,3 +650,11 @@ async def get_balance(request: BalanceRequest):
 @app.get("/api/balance/{address}")
 async def get_balance_get(address: str):
     return await get_balance(BalanceRequest(address=address))
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "crypto-snapshot-pro", "proxy_enabled": USE_PROXY}
