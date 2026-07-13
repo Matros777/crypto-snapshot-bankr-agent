@@ -125,7 +125,8 @@ async def mcp_handler(request: Request):
 
                     if response.status_code == 200:
                         data = response.json()
-                        content = data.get("message", {}).get("content", str(data))
+                        # Извлекаем analysis из ответа
+                        content = data.get("analysis", str(data))
                         return {
                             "jsonrpc": "2.0",
                             "id": request_id,
@@ -393,7 +394,7 @@ async def crypto_snapshot(request: Request):
     })
 
 # ============================================================
-# ГЕНЕРАЦИЯ СИГНАЛА (MARKDOWN ВЫВОД)
+# ГЕНЕРАЦИЯ СИГНАЛА (ЧИСТЫЙ MARKDOWN)
 # ============================================================
 
 async def generate_signal(symbol: str) -> str:
@@ -481,10 +482,13 @@ async def generate_signal(symbol: str) -> str:
         ai_analysis = await generate_ai_analysis(symbol, signal_data)
 
         # ============================================================
-        # MARKDOWN ВЫВОД (БЕЗ МУСОРНЫХ СИМВОЛОВ)
+        # ЧИСТЫЙ MARKDOWN ВЫВОД (БЕЗ МУСОРНЫХ СИМВОЛОВ)
         # ============================================================
         
         signal_emoji = "🚀" if signal == "LONG" else "🔥" if signal == "SHORT" else "➡️"
+        
+        # Очищаем AI анализ от лишних символов, если они есть
+        ai_analysis = ai_analysis.replace('\r', '').strip()
         
         result = f"""# 📊 CRYPTO SNAPSHOT PRO — {symbol.replace('USDT', '/USDT')}
 
