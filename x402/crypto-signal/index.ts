@@ -2,7 +2,8 @@ export default async function handler(req: Request): Promise<Response> {
   try {
     const body = await req.json();
     
-    const response = await fetch('http://localhost:10000/', {
+    // ⚠️ МЕНЯЕМ URL НА RENDER (КОГДА ЗАДЕПЛОИШЬ)
+    const response = await fetch('https://crypto-snapshot-bankr-agent.onrender.com/', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
